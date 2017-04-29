@@ -1,0 +1,8 @@
+[package]
+name = "schedule"
+version = "0.1.0"
+authors = ["Alex <busarovalex@yandex.ru>"]
+
+[dependencies]
+chrono = "0.3.0"
+log = "0.3.7"
