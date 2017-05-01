@@ -21,21 +21,23 @@ pub struct Schedule<T: Send> {
     send: Sender<(T, DesiredTime)>,
 }
 
-struct ScheduledExecutor<T, S: Consumer<T>> {
+struct ScheduledExecutor<T, S: Consumer<T> + Send> {
     rcv: Receiver<(T, DesiredTime)>,
     queue: Queue<T>,
     consumer: S
 }
 
 impl<T: Send> Schedule<T> {
-    pub fn with_consumer<S: Consumer<T>>(consumer: S) -> Schedule<T> {
+    pub fn with_consumer<K: Send + 'static, S: Consumer<K> + Send + 'static>(consumer: S) -> Schedule<K> {
         let (send, rcv) = channel();
-        
-        ScheduledExecutor {
-            rcv: rcv,
-            queue: Queue::new(),
-            consumer: consumer
-        }.run();
+        thread::spawn(move || {
+            let mut excecutor = ScheduledExecutor {
+                rcv: rcv,
+                queue: Queue::new(),
+                consumer: consumer
+            };
+            excecutor.run();
+        });
 
         Schedule {
             send: send
@@ -55,9 +57,8 @@ impl<T: Send> Schedule<T> {
     }
 }
 
-impl<T, S: Consumer<T>> ScheduledExecutor<T, S> {
-    fn run(mut self) {
-        thread::spawn(move || {
+impl<T, S: Consumer<T> + Send> ScheduledExecutor<T, S> {
+    fn run(&mut self) {
             loop {
                 match send_while_next_is_available(&mut self.queue, &self.consumer) {
                     Some(desired_time) => {
@@ -76,9 +77,7 @@ impl<T, S: Consumer<T>> ScheduledExecutor<T, S> {
                 }
             }
             info!("ScheduledExecutor ended");
-        });
     } 
-    
 }
 
 impl<S, T> Consumer<T> for S where S: Fn(T) {
@@ -109,11 +108,11 @@ mod tests {
     #[test]
     fn consumes_data_in_correct_order() {
         //given
-        let (send, recv) = channel();
-        let schedule = Schedule::with_consumer(move |data| send.send(data).unwrap());
+        let (send, recv) = channel::<i32>();
+        let schedule = Schedule::<i32>::with_consumer(move |data| send.send(data).unwrap());
         let now = Local::now().naive_local();
         //when
-        schedule.send(1, now.checked_add_signed(Duration::milliseconds(10)).unwrap()).unwrap();
+        schedule.send(1i32, now.checked_add_signed(Duration::milliseconds(10)).unwrap()).unwrap();
         schedule.send(0, now).unwrap();
         //then
         assert_eq!(recv.recv().unwrap(), 0);
